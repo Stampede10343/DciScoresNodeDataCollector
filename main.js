@@ -1,4 +1,4 @@
-var baseUrl = "https://bridge.competitionsuite.com/api/orgscores/";
+var baseUrl = "https://backend.dci.org/api/v1/"
 var request = require('request');
 var mysql   = require('mysql');
 
@@ -6,10 +6,7 @@ if (!String.format) {
   String.format = function(format) {
     var args = Array.prototype.slice.call(arguments, 1);
     return format.replace(/{(\d+)}/g, function(match, number) {
-      return typeof args[number] != 'undefined'
-        ? args[number]
-        : match
-      ;
+      return typeof args[number] != 'undefined' ? args[number] : match;
     });
   };
 }
@@ -34,6 +31,68 @@ dbConnection.query('select * from corps', function(err, results, fields) {
     }
   }
 })
+
+function getEvents() {
+  console.log('Getting events');
+  request(baseUrl + 'events?sort=startDate&limit=200', function(err, res, body) {
+    if(err) {
+      console.log(err)
+    }
+    else {
+      saveNewEvents(JSON.parse(body));
+    }
+  });
+}
+
+function saveNewEvents(events) {
+  for(var i = 0; i < events.length; i++) {
+    var event = events[i];
+    //console.log(event.name + ' - ' + event.locationCity + ', ' + event.locationState);
+    findAndSaveEvent(event);
+  }
+}
+
+function findAndSaveEvent(event) {
+  dbConnection.query('select id from venue where dciid = ?', event.venue.id, (err, results, fields) => {
+    if(err) {
+      console.log(err);
+    } else if(results.length == 1) {
+      console.log('Found eventId: ' + results[0]);
+      saveEvent(event, results[0]);
+    } else {
+      console.log('Inserting venue for ' + event.name + ' venue: ' + event.venue.name);
+      saveVenueAndEvent(event);
+      }
+  });
+}
+
+function saveEvent(event, venueId) {
+  console.log('Saving event: ' + event.name + ' venueId: ' + venueId);
+  var eventStartTime = event.startTime ? event.startTime.slice(0, event.startTime.indexOf("+")) : null;
+  dbConnection.query('insert into competition (name, location, date, imageurl, venueid) values(?, ?, ?, ?, ?)',
+  [event.name, event.locationCity + ', ' + event.locationState, eventStartTime, event.eventImage, venueId],
+  function(err, results, fields) {
+    if(err) {
+      console.log(err);
+    } else {
+      console.log(fields);
+    }
+  });
+}
+
+function saveVenueAndEvent(event) {
+  var venue = event.venue;
+  console.log('Saving venue ' + venue.name);
+  dbConnection.query('insert into venue (dciid, name, address, surfacetype) values (?, ?, ?, ?)',
+  [venue.id, venue.name, venue.address + ' ' + venue.city + ', ' + venue.state, venue.surfaceType],
+  (err, results, fields) => {
+    if(err) {
+      console.log(err);
+    } else {
+      saveEvent(event, results.insertId);
+    }
+  });
+}
 
 function getSeasons() {
   request(baseUrl + 'GetSeasons/jsonp?organization=96b77ec2-333e-41e9-8d7d-806a8cbe116b&version=1.1.5&callback=json',
@@ -152,4 +211,5 @@ function updateCompetitionRecord(scoredCorps, corpsId, compId) {
     });
 }
 
-getCurrentCompetitions(new Date(Date.now() - (1000*60*60*24)*2));
+//getCurrentCompetitions(new Date(Date.now() - (1000*60*60*24)*2));
+getEvents();
